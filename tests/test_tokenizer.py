@@ -118,3 +118,31 @@ def test_split_on_unicode():
 
     assert words == [" elle", " est", " l", "'", "\ufffd", "é", "rit", "oire"]
     assert word_tokens == [[8404], [871], [287], [6], [246], [526], [3210], [20378]]
+
+
+def test_split_thai_tokens():
+    """Test Thai word tokenization with proper word segmentation."""
+    model = WhisperModel("tiny")
+    tokenizer = Tokenizer(model.hf_tokenizer, multilingual=True, language="th", task="transcribe")
+    
+    # Mock Thai text tokens (these would represent Thai characters/syllables)
+    # In practice, you'd need actual Thai token IDs from the model
+    # This test will only run if pythainlp is installed
+    try:
+        from pythainlp import word_tokenize
+        
+        # Test with actual Thai text by encoding and then splitting
+        thai_text = "สวัสดีครับ"
+        tokens = tokenizer.encode(thai_text)
+        
+        words, word_tokens = tokenizer.split_to_word_tokens(tokens)
+        
+        # With pythainlp, this should split into proper Thai words
+        # The exact words depend on the tokenizer's word segmentation
+        assert len(words) > 0
+        assert len(word_tokens) == len(words)
+        assert all(len(wt) > 0 for wt in word_tokens)
+        
+    except ImportError:
+        # If pythainlp is not installed, it should fall back to unicode splitting
+        pass

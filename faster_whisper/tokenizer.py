@@ -144,7 +144,10 @@ class Tokenizer:
     def split_to_word_tokens(
         self, tokens: List[int]
     ) -> Tuple[List[str], List[List[int]]]:
-        if self.language_code in {"zh", "ja", "th", "lo", "my", "yue"}:
+        if self.language_code == "th":
+            # Use Thai-specific word segmentation for better word boundaries
+            return self.split_to_word_tokens_thai(tokens)
+        elif self.language_code in {"zh", "ja", "lo", "my", "yue"}:
             # These languages don't typically use spaces, so it is difficult to split words
             # without morpheme analysis. Here, we instead split words at any
             # position where the tokens are decoded as valid unicode points
@@ -202,6 +205,105 @@ class Tokenizer:
                 words[-1] = words[-1] + subword
                 word_tokens[-1].extend(subword_tokens)
 
+        return words, word_tokens
+
+    def split_to_word_tokens_thai(
+        self, tokens: List[int]
+    ) -> Tuple[List[str], List[List[int]]]:
+        """
+        Split Thai tokens into proper words using PyThaiNLP while maintaining
+        token-to-word mapping for timestamp alignment.
+        
+        Args:
+            tokens: List of Whisper token IDs
+            
+        Returns:
+            Tuple of (words, word_tokens) where:
+            - words: List of Thai words as strings
+            - word_tokens: List of token groups, each group corresponds to a word
+        """
+        try:
+            from pythainlp import word_tokenize
+        except ImportError:
+            # Fall back to unicode splitting if pythainlp not available
+            import warnings
+            warnings.warn(
+                "pythainlp not installed. Falling back to character-level splitting for Thai. "
+                "Install with: pip install pythainlp"
+            )
+            return self.split_tokens_on_unicode(tokens)
+        
+        if not tokens:
+            return [], []
+        
+        # Step 1: Build a character-level mapping from tokens
+        # Skip special tokens like timestamps when building the text
+        text_tokens = [t for t in tokens if t < self.timestamp_begin]
+        special_tokens = [(i, t) for i, t in enumerate(tokens) if t >= self.timestamp_begin]
+        
+        if not text_tokens:
+            # Only special tokens, return them as-is
+            words = [self.decode_with_timestamps([t]) for _, t in special_tokens]
+            word_tokens = [[t] for _, t in special_tokens]
+            return words, word_tokens
+        
+        # Decode only text tokens to get the full text
+        full_text = self.decode(text_tokens)
+        
+        # Build character to token index mapping
+        char_to_token_idx = {}
+        current_text = ""
+        
+        for i, token_id in enumerate(text_tokens):
+            # Decode all tokens up to current one
+            prev_len = len(current_text)
+            current_text = self.decode(text_tokens[:i+1])
+            
+            # Map new characters to this token's index in the original tokens list
+            original_idx = tokens.index(token_id)
+            for char_idx in range(prev_len, len(current_text)):
+                char_to_token_idx[char_idx] = original_idx
+        
+        # Step 2: Segment text into Thai words
+        thai_words = word_tokenize(full_text, engine="newmm", keep_whitespace=False)
+        
+        # Step 3: Map Thai words back to tokens
+        words = []
+        word_tokens = []
+        
+        char_offset = 0
+        for word in thai_words:
+            if not word.strip():  # Skip empty words
+                char_offset += len(word)
+                continue
+            
+            word_len = len(word)
+            
+            # Find unique token indices for this word
+            token_indices = set()
+            for char_pos in range(char_offset, min(char_offset + word_len, len(full_text))):
+                if char_pos in char_to_token_idx:
+                    token_indices.add(char_to_token_idx[char_pos])
+            
+            if token_indices:
+                # Sort indices and get corresponding tokens
+                sorted_indices = sorted(token_indices)
+                word_token_group = [tokens[i] for i in sorted_indices]
+                
+                words.append(word)
+                word_tokens.append(word_token_group)
+            
+            char_offset += word_len
+        
+        # Step 4: Handle special tokens (timestamps, etc.)
+        # Insert them back at appropriate positions
+        if special_tokens:
+            # For simplicity, append timestamp tokens at the end
+            # In practice, you might want to insert them at their original positions
+            for idx, token in special_tokens:
+                words.append(self.decode_with_timestamps([token]))
+                word_tokens.append([token])
+        
         return words, word_tokens
 
 

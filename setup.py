@@ -61,6 +61,9 @@ setup(
             "isort==5.*",
             "pytest==7.*",
         ],
+        "thai": [
+            "pythainlp>=4.0",
+        ],
     },
     packages=find_packages(),
     include_package_data=True,
